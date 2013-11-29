@@ -11,19 +11,41 @@ public class ServerException extends Exception {
 
 	private static final long serialVersionUID = 1L;
 
-	private static int TYPE_GENERAL = 0;
-	private static int TYPE_BOTTLE_ERROR = 1;
-
-	private static int TYPE_CONN_ERROR = 2;
-
-	private static int TYPE_AUTH_ERROR = 3;
-
-	private static int TYPE_INTERNAL_ERR = 4;
+	public static final int TYPE_GENERAL = 0;
+	public static final int TYPE_BOTTLE_ERROR = 1;
+	public static final int TYPE_CONN_ERROR = 2;
+	public static final int TYPE_AUTH_ERROR = 3;
+	public static final int TYPE_INTERNAL_ERR = 4;
+	public static final int TYPE_DATA_EXHAUSTED = 5;
 	
 	private String mExceptionName;
 	private String mExceptionDetail;
 	private int mExceptionCode;
 	
+	public String getmExceptionName() {
+		return mExceptionName;
+	}
+
+	public void setmExceptionName(String mExceptionName) {
+		this.mExceptionName = mExceptionName;
+	}
+
+	public String getmExceptionDetail() {
+		return mExceptionDetail;
+	}
+
+	public void setmExceptionDetail(String mExceptionDetail) {
+		this.mExceptionDetail = mExceptionDetail;
+	}
+
+	public int getmExceptionCode() {
+		return mExceptionCode;
+	}
+
+	public void setmExceptionCode(int mExceptionCode) {
+		this.mExceptionCode = mExceptionCode;
+	}
+
 	private ServerException(){};
 	
 	public static ServerException makeGeneralException(String name, String detail){
@@ -82,7 +104,7 @@ public class ServerException extends Exception {
 		ServerException e = 
 				makeGeneralException("ServerInternalException"
 						, "Data record exhausted!");
-		e.mExceptionCode = TYPE_INTERNAL_ERR   ;
+		e.mExceptionCode = TYPE_DATA_EXHAUSTED   ;
 		return e;
 	}
 

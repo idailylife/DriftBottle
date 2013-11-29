@@ -5,6 +5,8 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
+import android.util.Log;
+
 /**
  * 负责管理文件读写
  * @author BorisHe
@@ -14,7 +16,7 @@ public class FileIOHelper {
 	
 	/**
 	 * 写入到文件
-	 * @param filename 目标目录
+	 * @param filename 目标完整路径（含文件名）
 	 * @param bytes
 	 * @return 写入的File对象，如果为失败返回null
 	 */
@@ -22,6 +24,8 @@ public class FileIOHelper {
 		try {
 			File file = new File(filename);
 			if(file.exists()){
+				Log.w("FileIOHelper"
+						, "Filename " + filename + " already exists, it will be erased for new data !");
 				boolean b = file.delete();
 				if(!b){
 					throw new IOException();
@@ -30,6 +34,7 @@ public class FileIOHelper {
 			FileOutputStream outputStream = new FileOutputStream(file);
 			outputStream.write(bytes);
 			outputStream.close();
+			Log.i("FileIOHelper", "File stored at " + filename);
 			
 			return file;
 		} catch (FileNotFoundException e) {

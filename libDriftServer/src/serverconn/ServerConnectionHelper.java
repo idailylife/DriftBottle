@@ -39,7 +39,8 @@ import serverconn.models.Data;
 public class ServerConnectionHelper {
 	private static ServerConnectionHelper INSTANCE = new ServerConnectionHelper();
 	private static final String BASE_URI = "http://driftbottlezju.duapp.com/DriftBottle/";
-	private String FILE_URI = null; // 文件读写路径
+	private String FILE_URI = null; // 文件读写路径(不含文件名)
+	private  String DEFAULT_FILE_NAME = "file.amr"; //默认存储的文件名 （不含`/`）
 	private int MAX_THROW_COUNT = 5; //最大丢弃次数
 
 	private String SESSION_ID = null;
@@ -49,32 +50,39 @@ public class ServerConnectionHelper {
 	private boolean isLogIn = false;
 	private Object KEY_PHPSESSID = "PHPSESSID";
 	private String mLatestDataId = null;
+	private String mLatestSender = null; //存储最新一条信息的发件人记录
 	
 
 	public String getmLatestDataId() {
 		return mLatestDataId;
 	}
-
-	public void setmLatestDataId(String mLatestDataId) {
-		this.mLatestDataId = mLatestDataId;
+	
+	/**
+	 * 获得最近存储的文件的绝对路径
+	 * @return 如果没有则返回null
+	 */
+	public String getLatestFileNameAndPath(){
+		if(mData == null)
+			return null;
+		
+		return mData.getFile().getAbsolutePath();
 	}
 
 	private ServerConnectionHelper() {
-		FILE_URI = Environment.getExternalStorageDirectory() + "/"
-				+ this.getClass().getPackage().getName();
+		FILE_URI = Environment.getExternalStorageDirectory().getPath();
 		File f = new File(FILE_URI);
 		if (!f.exists()) {
 			f.mkdir();
 		}
-		FILE_URI += "/file.raw";
+		//FILE_URI += "/file.raw"; //文件名称存于DEFAULT_FILE_NAME
 		Log.d("fileDir", FILE_URI);
 	}
 
 	/**
-	 * 强制更改默认存储文件的路径及文件名 注意安全...
+	 * 强制更改默认存储文件的<b>路径</b><s><i>及文件名</i></s> 注意安全...
 	 * 
 	 * @param filepath
-	 *            完整文件路径
+	 *            完整文件路径(目录地址)
 	 */
 	public void setFileUri(String filepath) {
 		FILE_URI = filepath;
@@ -91,11 +99,11 @@ public class ServerConnectionHelper {
 		return INSTANCE;
 	}
 
-	public Bottle getmBottle() {
+	public Bottle getBottle() {
 		return mBottle;
 	}
 
-	public void setmBottle(Bottle mBottle) {
+	public void setBottle(Bottle mBottle) {
 		this.mBottle = mBottle;
 	}
 
@@ -124,7 +132,7 @@ public class ServerConnectionHelper {
 	 * @throws ServerException
 	 *             登陆错误的话抛出各种异常
 	 */
-	public void logIn() throws ServerException {
+	public boolean logIn() throws ServerException {
 		checkBottleState();
 
 		isLogIn = false;
@@ -167,6 +175,8 @@ public class ServerConnectionHelper {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+		
+		return isLogIn;
 	}
 
 	public boolean isLogIn() {
@@ -207,22 +217,42 @@ public class ServerConnectionHelper {
 		}
 		return null;
 	}
+	
+	/**
+	 * 从服务器取一条消息 如果不指定则返回随机推荐消息<br/>
+	 * <b>如果需要保留服务器的消息及数据，则使用有变量keepDataAtServer的方法</b>
+	 * 
+	 * @param dataId
+	 *            (可为null)指定一条消息
+	 * @return 对应的Data
+	 * @throws ServerException
+	 */
+	public Data getMessage(String dataId) throws ServerException{
+		return getMessage(dataId, false);
+	}
 
 	/**
 	 * 从服务器取一条消息 如果不指定则返回随机推荐消息
 	 * 
 	 * @param dataId
 	 *            (可为null)指定一条消息
-	 * @return 对应的Data，数据中的byte[]对象为二进制数据，至于要变成具体的什么自己解决啦
+	 * @param keepDataAtServer 是否保留这条消息在服务器的记录（DEBUG用）
+	 * @return 对应的Data
 	 * @throws ServerException
 	 */
-	public Data getMessage(String dataId) throws ServerException {
+	public Data getMessage(String dataId, boolean keepDataAtServer) throws ServerException {
 		checkBottleState();
 		List<NameValuePair> params = null;
 		if (null != dataId) {
 			params = new ArrayList<NameValuePair>();
 			params.add(new BasicNameValuePair("dataid", dataId));
 		}
+		if (true == keepDataAtServer){
+			if(null == params)
+				params = new ArrayList<NameValuePair>();
+			params.add(new BasicNameValuePair("keep", "1"));
+		}
+		
 		String uri = BASE_URI + "get_message.php";
 		JSONObject jsonObject = getGetResponseForJSONObject(uri, params, null);
 		try {
@@ -235,12 +265,20 @@ public class ServerConnectionHelper {
 						jsonObject.getDouble("lat") };
 				String hexColor = jsonObject.getString("color");
 				long timestamp = jsonObject.getLong("timestamp");
-				File file = FileIOHelper.writeToFile(FILE_URI, rawData);
+				boolean isReplyMsg = jsonObject.getBoolean("replymsg");
+				String remoteFileName = jsonObject.getString("filename"); 
+				//留着以后有需要的时候用
+				File file = FileIOHelper.writeToFile(FILE_URI + "/" + DEFAULT_FILE_NAME
+						, rawData);
 
 				mData = new Data(file, loc, hexColor, timestamp);
 				mData.setSender(jsonObject.getString("sender"));
+				mData.setReplyMsg(isReplyMsg);
 				if (!jsonObject.getString("discards").equals("null")) {
 					mData.setDiscards(jsonObject.getString("discards"));
+				}
+				if(null != dataId){
+					mLatestSender = mData.getSender();
 				}
 				return mData;
 			case 1:
@@ -479,6 +517,10 @@ public class ServerConnectionHelper {
 		if (mData.haveDiscardRecords()) {
 			params.add(new BasicNameValuePair("discards", mData.getDiscards()));
 		}
+		if (mData.isDiscardedMsg()){
+			//被丢回的消息
+			params.add(new BasicNameValuePair("orig_sender", mData.getSender()));
+		}
 
 		JSONObject jsonObject = getPostRequestForJSONObject(uri, params, null,
 				mData.getFile());
@@ -506,16 +548,36 @@ public class ServerConnectionHelper {
 	 * 如果消息被丢弃的记录达到5次，记录将不会回传到服务器，直接被销毁
 	 * <br/>
 	 * <b>[注意]回复消息不能被抛回大海，执行此操作消息将直接被销毁</b>
+	 * <br/>
+	 * <b>此方法不会删除本地存储的文件，如需删除请调用重构的带参数的方法
+	 * 
 	 * @return 操作结果
 	 * @throws ServerException 
 	 */
 	public boolean throwMessage() throws ServerException{
+		return throwMessage(false);
+	}
+	
+	/**
+	 * 将上一条消息丢回大海
+	 * 如果消息被丢弃的记录达到5次，记录将不会回传到服务器，直接被销毁
+	 * <br/>
+	 * <b>[注意]回复消息不能被抛回大海，执行此操作消息将直接被销毁</b>
+	 * @param removeLocalFile 是否删除本地存储的文件
+	 * @return 操作结果
+	 * @throws ServerException 
+	 */
+	public boolean throwMessage(boolean removeLocalFile) throws ServerException{
 		if(mData == null || mBottle == null){
 			Log.e("Empty data or bottle", "Please set them before throw it");
 			return false;
 		}
+		
 		if(mData.isReplyMessage()){
-			Log.w("mData will be dropped", "because it is a reply messag1!!!");
+			Log.w("mData will be dropped", "because it is a reply message !!!");
+			if(mData.getFile().exists() && removeLocalFile){
+				mData.getFile().delete();
+			}
 			mData = null;
 			return true;
 		}
@@ -523,11 +585,22 @@ public class ServerConnectionHelper {
 		int throwCount = mData.getThrowCount();
 		if(throwCount >= MAX_THROW_COUNT ){
 			Log.w("mData will be dropped", "because it exceeds maximum drop count");
+			if(mData.getFile().exists() && removeLocalFile){
+				mData.getFile().delete();
+			}
 			mData = null;
 			return true;
 		}
+		mData.setDiscardedMsg(true);
 		mData.addDiscardRecord(mBottle);
-		return putMessage(null);
+		
+		boolean putResult =  putMessage(null);
+		if(putResult){
+			if(mData.getFile().exists() && removeLocalFile){
+				mData.getFile().delete();
+			}
+		}
+		return putResult;
 	}
 	
 	/**
@@ -541,5 +614,22 @@ public class ServerConnectionHelper {
 		if(setToDataStore)
 			mData = data;
 		return data;
+	}
+	
+	/**
+	 * 重构的方法，准备一条回复的消息供填充内容，其中消息的target已设置好
+	 * 使用该不带参数的方法，不会影响helper的mData变量
+	 * @return
+	 */
+	public Data prepareReplyMessage(){
+		return prepareReplyMessage(false);
+	}
+
+	public String getDefaultFileName() {
+		return DEFAULT_FILE_NAME;
+	}
+
+	public void setDefaultFileName(String defaultName) {
+		DEFAULT_FILE_NAME = defaultName;
 	}
 }

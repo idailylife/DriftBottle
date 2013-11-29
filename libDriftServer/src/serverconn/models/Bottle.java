@@ -6,9 +6,9 @@ package serverconn.models;
  *
  */
 public class Bottle {
-	private String bottleId;
-	private String bottleType;
-	private String password;
+	private String bottleId;  //瓶子的ID号
+	private String bottleType; //瓶子的类型（声音瓶啊什么的，目前没用）
+	private String password; //密码
 	
 	public Bottle (){};
 	public Bottle(String id, String type, String pswd){
