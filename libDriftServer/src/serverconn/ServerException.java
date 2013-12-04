@@ -17,6 +17,7 @@ public class ServerException extends Exception {
 	public static final int TYPE_AUTH_ERROR = 3;
 	public static final int TYPE_INTERNAL_ERR = 4;
 	public static final int TYPE_DATA_EXHAUSTED = 5;
+	public static final int TYPE_CONVERSATION_END = 6;
 	
 	private String mExceptionName;
 	private String mExceptionDetail;
@@ -105,6 +106,18 @@ public class ServerException extends Exception {
 				makeGeneralException("ServerInternalException"
 						, "Data record exhausted!");
 		e.mExceptionCode = TYPE_DATA_EXHAUSTED   ;
+		return e;
+	}
+	
+	/**
+	 * ‘∂≥Ãª·ª∞÷’÷π
+	 * @return
+	 */
+	public static ServerException makeConversationEndException(){
+		ServerException e = 
+				makeGeneralException("ConversationEndException"
+						, "Remote user disconnected!");
+		e.mExceptionCode = TYPE_CONVERSATION_END;
 		return e;
 	}
 

@@ -1,5 +1,9 @@
 package edu.zju.inlab.driftbottle;
 
+import java.io.File;
+import java.util.Date;
+import java.util.List;
+
 import serverconn.ServerConnectionHelper;
 import serverconn.ServerException;
 import serverconn.models.*;
@@ -43,30 +47,31 @@ public class MainActivity extends Activity {
 
 		@Override
 		protected Boolean doInBackground(Void... params) {
-			Bottle bottle = new Bottle("10001", "0", "8080");
+			Bottle bottle = new Bottle("10003", "0", "8080");
 			helper.setBottle(bottle);
 			try {
 				helper.logIn();
-				String newMsgId = helper.requestMessage();
+				List<String> newMsgId = helper.requestMessage("10006");
 				Data data = null;
 				if(newMsgId != null){
 					Log.d("newmsg", "id=" + newMsgId);
-					data = helper.getMessage(newMsgId, true);
+					for(String id: newMsgId){
+						helper.getMessage(id);
+					}
+					
 				} else {
 					Log.d("newmsg", "not found");
 					data = helper.getMessage(null, true);
 				}
-				Log.d("blabla", data.toString());
-				//data.setTimestamp(System.currentTimeMillis() / 1000); // millisecond to second
 				
-				//data.setTarget(helper.prepareReplyMessage(false).getTarget());
-				helper.throwMessage(false);
-//				boolean b = helper.putMessage(data);
-//				if(b){
-//					Log.d("yaeh", "data transmitted!");
-//				} else {
-//					Log.d("no", "wtf");
-//				}
+//				if(null != data)
+//					helper.throwMessage();
+				Data nData = helper.prepareReplyMessage();
+				nData.setLocation(new double[]{1.2, 1.3});
+				File dataFile = new File(helper.getLatestFileNameAndPath());
+				nData.setFile(dataFile);
+				nData.setTimestamp(System.currentTimeMillis()/1000);
+				helper.putMessage(nData);
 				
 				
 			} catch (ServerException e) {

@@ -5,8 +5,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.NameValuePair;
@@ -21,6 +25,7 @@ import org.apache.http.entity.mime.content.FileBody;
 import org.apache.http.entity.mime.content.StringBody;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -40,20 +45,28 @@ public class ServerConnectionHelper {
 	private static ServerConnectionHelper INSTANCE = new ServerConnectionHelper();
 	private static final String BASE_URI = "http://driftbottlezju.duapp.com/DriftBottle/";
 	private String FILE_URI = null; // 文件读写路径(不含文件名)
-	private  String DEFAULT_FILE_NAME = "file.amr"; //默认存储的文件名 （不含`/`）
+
 	private int MAX_THROW_COUNT = 5; //最大丢弃次数
 
 	private String SESSION_ID = null;
 
 	private Bottle mBottle = null;
-	private Data mData = null;
+	//private Data mData = null;
+	private Data mDataReceived = null; //最后一条收到的信息
+	private Data mDataSent = null; //最后一条发送的信息
+	
 	private boolean isLogIn = false;
 	private Object KEY_PHPSESSID = "PHPSESSID";
-	private String mLatestDataId = null;
+	private List<String> mLatestDataId = null;
 	private String mLatestSender = null; //存储最新一条信息的发件人记录
 	
+	public final String DATA_ID_END_CONVERSATION = "1";  //终止会话用的特殊ID号
+	
+	public String getmLatestSender() {
+		return mLatestSender;
+	}
 
-	public String getmLatestDataId() {
+	public List<String> getLatestDataId() {
 		return mLatestDataId;
 	}
 	
@@ -62,14 +75,14 @@ public class ServerConnectionHelper {
 	 * @return 如果没有则返回null
 	 */
 	public String getLatestFileNameAndPath(){
-		if(mData == null)
+		if(mDataReceived == null)
 			return null;
 		
-		return mData.getFile().getAbsolutePath();
+		return mDataReceived.getFile().getAbsolutePath();
 	}
 
 	private ServerConnectionHelper() {
-		FILE_URI = Environment.getExternalStorageDirectory().getPath();
+		FILE_URI = Environment.getExternalStorageDirectory().getPath() + "/soundrecord";
 		File f = new File(FILE_URI);
 		if (!f.exists()) {
 			f.mkdir();
@@ -107,12 +120,20 @@ public class ServerConnectionHelper {
 		this.mBottle = mBottle;
 	}
 
-	public Data getData() {
-		return mData;
+	/**
+	 * 获取最后一次收到的Data
+	 * @return
+	 */
+	public Data getDataReceived() {
+		return mDataReceived;
 	}
 
-	public void setData(Data data) {
-		this.mData = data;
+	/**
+	 * 设置要发送的Data
+	 * @param data
+	 */
+	public void setDataSent(Data data) {
+		this.mDataSent = data;
 	}
 
 	/**
@@ -172,7 +193,7 @@ public class ServerConnectionHelper {
 				throw ServerException.makeAuthFailureException();
 			}
 		} catch (JSONException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		}
 		
@@ -184,21 +205,30 @@ public class ServerConnectionHelper {
 	}
 
 	/**
-	 * 向服务器询问是否有未读的回复消息
-	 * 
-	 * @return 如果没有返回null，否则返回消息的ID号
+	 * 向服务器询问是否有未读的回复消息，多条消息按照时间戳升序排列
+	 * 如果有终止会话的消息，那么会放在最后一个，消息ID=1 
+	 * @param targetBottleId 指定只能接受这个ID的新回复消息，为null则不限制
+	 * @return 如果没有则返回null，否则返回消息ID的数组，按照时间升序
 	 * @throws ServerException
 	 */
-	public String requestMessage() throws ServerException {
+	public List<String> requestMessage(String targetBottleId) throws ServerException {
 		checkBottleState();
 
 		String uri = BASE_URI + "request_message.php";
+		if(null != targetBottleId){
+			uri += ("?target=" + targetBottleId);
+		}
+		
 		JSONObject jsonObject = getGetResponseForJSONObject(uri, null, null);
 		try {
 			int state = jsonObject.getInt("state");
 			switch (state) {
 			case 0: // success
-				mLatestDataId = jsonObject.getString("content");
+				JSONArray jsonArray = jsonObject.getJSONArray("content");
+				mLatestDataId = new ArrayList<String>();;
+				for(int i=0; i<jsonArray.length(); i++){
+					mLatestDataId.add(jsonArray.getString(i));
+				}
 				return mLatestDataId;
 			case 1:
 				mLatestDataId = null;
@@ -242,8 +272,12 @@ public class ServerConnectionHelper {
 	 */
 	public Data getMessage(String dataId, boolean keepDataAtServer) throws ServerException {
 		checkBottleState();
+
 		List<NameValuePair> params = null;
 		if (null != dataId) {
+			if(dataId.equals(DATA_ID_END_CONVERSATION)){
+				throw ServerException.makeConversationEndException();
+			}
 			params = new ArrayList<NameValuePair>();
 			params.add(new BasicNameValuePair("dataid", dataId));
 		}
@@ -266,21 +300,24 @@ public class ServerConnectionHelper {
 				String hexColor = jsonObject.getString("color");
 				long timestamp = jsonObject.getLong("timestamp");
 				boolean isReplyMsg = jsonObject.getBoolean("replymsg");
-				String remoteFileName = jsonObject.getString("filename"); 
+				//String remoteFileName = jsonObject.getString("filename"); 
 				//留着以后有需要的时候用
-				File file = FileIOHelper.writeToFile(FILE_URI + "/" + DEFAULT_FILE_NAME
+				SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.CHINA);
+				String filename = dateFormat.format(new Date());
+				File file = FileIOHelper.writeToFile(FILE_URI + 
+						"/" + filename + ".amr"
 						, rawData);
 
-				mData = new Data(file, loc, hexColor, timestamp);
-				mData.setSender(jsonObject.getString("sender"));
-				mData.setReplyMsg(isReplyMsg);
+				mDataReceived = new Data(file, loc, hexColor, timestamp);
+				mDataReceived.setSender(jsonObject.getString("sender"));
+				mDataReceived.setReplyMsg(isReplyMsg);
 				if (!jsonObject.getString("discards").equals("null")) {
-					mData.setDiscards(jsonObject.getString("discards"));
+					mDataReceived.setDiscards(jsonObject.getString("discards"));
 				}
 				if(null != dataId){
-					mLatestSender = mData.getSender();
+					mLatestSender = mDataReceived.getSender();
 				}
-				return mData;
+				return mDataReceived;
 			case 1:
 				// not login
 				throw ServerException.makeAuthFailureException();
@@ -295,7 +332,7 @@ public class ServerConnectionHelper {
 			}
 
 		} catch (JSONException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		}
 
@@ -341,13 +378,13 @@ public class ServerConnectionHelper {
 			HttpResponse httpResponse = httpClient.execute(httpPost);
 			return httpResponse;
 		} catch (UnsupportedEncodingException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		} catch (ClientProtocolException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		}
 		return null;
@@ -382,13 +419,10 @@ public class ServerConnectionHelper {
 				return jsonObject;
 
 			} catch (IllegalStateException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			} catch (JSONException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
@@ -437,10 +471,10 @@ public class ServerConnectionHelper {
 			return httpResponse;
 
 		} catch (ClientProtocolException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		}
 		return null;
@@ -473,13 +507,13 @@ public class ServerConnectionHelper {
 				return jsonObject;
 
 			} catch (IllegalStateException e) {
-				// TODO Auto-generated catch block
+				
 				e.printStackTrace();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
+				
 				e.printStackTrace();
 			} catch (JSONException e) {
-				// TODO Auto-generated catch block
+				
 				e.printStackTrace();
 			}
 		}
@@ -496,34 +530,34 @@ public class ServerConnectionHelper {
 	 */
 	public boolean putMessage(Data data) throws ServerException {
 		if (null != data) {
-			mData = data;
+			mDataSent = data;
 		}
-		if (null == mData) {
+		if (null == mDataSent) {
 			Log.e("WTF", "Data unset!");
 			return false;
 		}
 
 		String uri = BASE_URI + "put_message.php";
 		List<NameValuePair> params = new ArrayList<NameValuePair>();
-		params.add(new BasicNameValuePair("timestamp", String.valueOf(mData
+		params.add(new BasicNameValuePair("timestamp", String.valueOf(mDataSent
 				.getTimestamp())));
-		params.add(new BasicNameValuePair("longitude", String.valueOf(mData
+		params.add(new BasicNameValuePair("longitude", String.valueOf(mDataSent
 				.getLocation()[0])));
-		params.add(new BasicNameValuePair("latitude", String.valueOf(mData
+		params.add(new BasicNameValuePair("latitude", String.valueOf(mDataSent
 				.getLocation()[1])));
-		if (mData.haveTarget()) {
-			params.add(new BasicNameValuePair("target", mData.getTarget()));
+		if (mDataSent.haveTarget()) {
+			params.add(new BasicNameValuePair("target", mDataSent.getTarget()));
 		}
-		if (mData.haveDiscardRecords()) {
-			params.add(new BasicNameValuePair("discards", mData.getDiscards()));
+		if (mDataSent.haveDiscardRecords()) {
+			params.add(new BasicNameValuePair("discards", mDataSent.getDiscards()));
 		}
-		if (mData.isDiscardedMsg()){
+		if (mDataSent.isDiscardedMsg()){
 			//被丢回的消息
-			params.add(new BasicNameValuePair("orig_sender", mData.getSender()));
+			params.add(new BasicNameValuePair("orig_sender", mDataSent.getSender()));
 		}
 
 		JSONObject jsonObject = getPostRequestForJSONObject(uri, params, null,
-				mData.getFile());
+				mDataSent.getFile());
 		try {
 			int state = jsonObject.getInt("errcode");
 			switch (state) {
@@ -537,7 +571,7 @@ public class ServerConnectionHelper {
 			}
 
 		} catch (JSONException e) {
-			// TODO Auto-generated catch block
+			
 			e.printStackTrace();
 		}
 		return false;
@@ -568,51 +602,58 @@ public class ServerConnectionHelper {
 	 * @throws ServerException 
 	 */
 	public boolean throwMessage(boolean removeLocalFile) throws ServerException{
-		if(mData == null || mBottle == null){
+		if(mDataReceived == null || mBottle == null){
 			Log.e("Empty data or bottle", "Please set them before throw it");
 			return false;
 		}
 		
-		if(mData.isReplyMessage()){
+		if(mDataReceived.isReplyMsgReceived()){
 			Log.w("mData will be dropped", "because it is a reply message !!!");
-			if(mData.getFile().exists() && removeLocalFile){
-				mData.getFile().delete();
+			if(mDataReceived.getFile().exists() && removeLocalFile){
+				mDataReceived.getFile().delete();
 			}
-			mData = null;
+			mDataReceived = null;
 			return true;
 		}
 		
-		int throwCount = mData.getThrowCount();
+		int throwCount = mDataReceived.getThrowCount();
 		if(throwCount >= MAX_THROW_COUNT ){
 			Log.w("mData will be dropped", "because it exceeds maximum drop count");
-			if(mData.getFile().exists() && removeLocalFile){
-				mData.getFile().delete();
+			if(mDataReceived.getFile().exists() && removeLocalFile){
+				mDataReceived.getFile().delete();
 			}
-			mData = null;
+			mDataReceived = null;
 			return true;
 		}
-		mData.setDiscardedMsg(true);
-		mData.addDiscardRecord(mBottle);
+		mDataReceived.setDiscardedMsg(true);
+		mDataReceived.addDiscardRecord(mBottle);
 		
-		boolean putResult =  putMessage(null);
+		boolean putResult =  putMessage(mDataReceived);
 		if(putResult){
-			if(mData.getFile().exists() && removeLocalFile){
-				mData.getFile().delete();
+			if(mDataReceived.getFile().exists() && removeLocalFile){
+				mDataReceived.getFile().delete();
 			}
 		}
+		mDataReceived = null;
+		
 		return putResult;
 	}
 	
 	/**
 	 * 准备一条回复的消息供填充内容，其中消息的target已设置好
-	 * @param setToDataStore 是否存储在helper的内部数据对象mData中
+	 * @param setToDataStore 是否存储在helper的内部数据对象mDataSent中
 	 * @return 一条回复的消息
 	 */
 	public Data prepareReplyMessage(boolean setToDataStore){
+		if(mDataReceived == null){
+			Log.e("ServerConnectionHelper:prepareReplyMsg", "Could not find any data received.");
+			return null;
+		}
+		
 		Data data = new Data();
-		data.setTarget(mData.getSender());//将原消息的发件人设置为当前消息的发送目标
+		data.setTarget(mDataReceived.getSender());//将原消息的发件人设置为当前消息的发送目标
 		if(setToDataStore)
-			mData = data;
+			mDataSent = data;
 		return data;
 	}
 	
@@ -624,12 +665,43 @@ public class ServerConnectionHelper {
 	public Data prepareReplyMessage(){
 		return prepareReplyMessage(false);
 	}
-
-	public String getDefaultFileName() {
-		return DEFAULT_FILE_NAME;
+	
+	/**
+	 * 结束当前对话
+	 * @param target 对方的ID，如果设置为null则使用helper自己记录下的上次发件人的ID
+	 * @throws ServerException 
+	 */
+	public void endConversation(String target) throws ServerException{
+		if(null == mLatestSender && null == target){
+			Log.e("endConversation", "Cannot find latest message sender... Have u got any msg before?");
+		}
+		
+		if(null == target){
+			target = mLatestSender;
+		}
+		
+		String uri = BASE_URI + "end_conversation.php";
+		List<NameValuePair> params = new ArrayList<NameValuePair>();
+		params.add(new BasicNameValuePair("target", target));
+		
+		JSONObject jsonObject = getGetResponseForJSONObject(uri, params, null);
+		try {
+			int state = jsonObject.getInt("state");
+			switch(state){
+			case 0:
+				Log.d("Yep..", "Conversation ended.");
+				return;
+			case 1:
+				throw ServerException.makeAuthFailureException();
+			case 2:
+				throw ServerException.makeServaeInternalException(jsonObject.getString("content"));
+			}
+		} catch (JSONException e) {
+			
+			e.printStackTrace();
+		}
+		Log.e("!!!!!", "CANNOT END CONVERSATION.");
 	}
-
-	public void setDefaultFileName(String defaultName) {
-		DEFAULT_FILE_NAME = defaultName;
-	}
+	
+	
 }

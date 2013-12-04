@@ -175,7 +175,7 @@ public class Data {
 	}
 	
 	/**
-	 * 这条消息是否是回复消息(包括我回复的或者别人回复给我的)
+	 * 这条消息是否是回复消息(target是否有效)
 	 * @return
 	 */
 	public boolean isReplyMessage(){
@@ -185,10 +185,14 @@ public class Data {
 			return false;
 		if(target.equals("null"))
 			return false;
-		return isReplyMsg();
+		return true;
 	}
 
-	public boolean isReplyMsg() {
+	/**
+	 * 是否是收到的别人的回复消息
+	 * @return
+	 */
+	public boolean isReplyMsgReceived() {
 		return isReplyMsg;
 	}
 
