@@ -156,7 +156,10 @@ public class ServerConnectionHelper {
 	public boolean logIn() throws ServerException {
 		checkBottleState();
 
+		
+		//Log.d("isLogIn ?", "" + isLogIn);
 		isLogIn = false;
+		SESSION_ID = null;  //清空SESSION_ID，防止进程未完全退出导致的残留问题
 
 		String uri = BASE_URI + "login.php";
 		List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
@@ -373,6 +376,7 @@ public class ServerConnectionHelper {
 				httpPost.setHeader("cookie", KEY_PHPSESSID + "=" + SESSION_ID);
 			}
 			if (null == httpClient) {
+				Log.w("getPostResponse", "httpClient is null.");
 				httpClient = new DefaultHttpClient();
 			}
 			HttpResponse httpResponse = httpClient.execute(httpPost);
@@ -521,10 +525,10 @@ public class ServerConnectionHelper {
 	}
 
 	/**
-	 * 往服务器上传一条消息 Data对象会保存到类的mData中
+	 * 往服务器上传一条消息 Data对象会保存到类的mDataSent中
 	 * 
 	 * @param data
-	 *            如果data==null则使用上一次存储的data(Helper内的mData对象)
+	 *            如果data==null则使用上一次存储的data(Helper内的mDataSent对象)
 	 * @return
 	 * @throws ServerException
 	 */
